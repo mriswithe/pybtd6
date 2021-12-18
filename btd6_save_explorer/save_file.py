@@ -5,6 +5,8 @@ import struct
 import zlib
 import json
 import hmac
+from Crypto.Cipher import AES
+
 
 FILE_PIECES = tuple[bytes, int, bytes, bytes]
 
@@ -29,7 +31,7 @@ class Save:
             self._dummy_header,
             self._password_index,
             self._salt,
-            self._payload,
+            self._encrypted_save,
         ) = self._read_file(file)
 
     @property
@@ -70,13 +72,19 @@ class Save:
     def save_data(self):
         return json.loads(self._uncompressed_save())
 
+    @property
+    def _save_cipher(self):
+        return AES.new(self.derived_key, AES.MODE_CBC, iv=self.derived_key)
+
     def _uncompressed_save(self) -> bytes:
         return zlib.decompress(self._decrypted_save())
 
     def _decrypted_save(self) -> bytes:
-        return hmac.digest(
-            self.derived_key + bytes(self._IV_LENGTH), self._payload, "SHA1"
-        )
+        return self._save_cipher.decrypt(self.encrypted_save)
+
+    @property
+    def encrypted_save(self) -> bytes:
+        return self._encrypted_save
 
     def _read_file(self, file: Path) -> FILE_PIECES:
         with file.open("rb") as fp:
