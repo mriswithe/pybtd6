@@ -1,9 +1,9 @@
+import hashlib
 import json
 import struct
 import zlib
 from pathlib import Path
-import hashlib
-import hmac
+
 from Crypto.Cipher import AES
 
 FILE_PIECES = tuple[bytes, int, bytes, bytes]
