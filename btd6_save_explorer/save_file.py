@@ -2,10 +2,9 @@ import json
 import struct
 import zlib
 from pathlib import Path
-
+import hashlib
+import hmac
 from Crypto.Cipher import AES
-from Crypto.Hash import SHA1
-from Crypto.Protocol.KDF import PBKDF2
 
 FILE_PIECES = tuple[bytes, int, bytes, bytes]
 
@@ -18,8 +17,8 @@ class Save:
     _SALT_LENGTH = 24
     _KEY_LENGTH = 16
     _IV_LENGTH = 16
-    _DERIVE_ITERATIONS = 10
-    _DEFAULT_PASSWORD = "11"
+    _HASH_ITERATIONS = 10
+    _DEFAULT_PASSWORD = b"11"
 
     _file_contents: bytes
 
@@ -48,13 +47,17 @@ class Save:
 
     @property
     def derived_key(self):
-        return PBKDF2(
-            password=self._DEFAULT_PASSWORD,
-            salt=self.salt,
-            dkLen=self._KEY_LENGTH + self._IV_LENGTH,
-            count=self._DERIVE_ITERATIONS,
-            hmac_hash_module=SHA1,
+        return hashlib.pbkdf2_hmac(
+            "SHA1",
+            self._DEFAULT_PASSWORD,
+            self.salt,
+            self._HASH_ITERATIONS,
+            self.dklen,
         )
+
+    @property
+    def dklen(self):
+        return self._IV_LENGTH + self._KEY_LENGTH
 
     @property
     def key(self) -> bytes:
