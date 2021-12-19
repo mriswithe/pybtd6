@@ -1,12 +1,11 @@
-import hashlib
-from pathlib import Path
-from pprint import pprint
+import json
 import struct
 import zlib
-import json
-import hmac
-from Crypto.Cipher import AES
+from pathlib import Path
 
+from Crypto.Cipher import AES
+from Crypto.Hash import SHA1
+from Crypto.Protocol.KDF import PBKDF2
 
 FILE_PIECES = tuple[bytes, int, bytes, bytes]
 
@@ -20,7 +19,7 @@ class Save:
     _KEY_LENGTH = 16
     _IV_LENGTH = 16
     _DERIVE_ITERATIONS = 10
-    _DEFAULT_PASSWORD = b"11"
+    _DEFAULT_PASSWORD = "11"
 
     _file_contents: bytes
 
@@ -33,6 +32,7 @@ class Save:
             self._salt,
             self._encrypted_save,
         ) = self._read_file(file)
+        self._cipher = None
 
     @property
     def dummy_header(self) -> bytes:
@@ -47,40 +47,46 @@ class Save:
         return self._salt
 
     @property
-    def derived_key(self) -> bytes:
-        args = dict(
-            hash_name="SHA1",
+    def derived_key(self):
+        return PBKDF2(
             password=self._DEFAULT_PASSWORD,
             salt=self.salt,
-            iterations=self._DERIVE_ITERATIONS,
-            dklen=self._IV_LENGTH + self._KEY_LENGTH,
+            dkLen=self._KEY_LENGTH + self._IV_LENGTH,
+            count=self._DERIVE_ITERATIONS,
+            hmac_hash_module=SHA1,
         )
 
-        resp = hashlib.pbkdf2_hmac(**args)
-        args["resp"] = resp
-        args["resp_len"] = len(resp)
-        args["resp_hex"] = resp.hex()
-        pprint(args)
-        return resp
+    @property
+    def key(self) -> bytes:
+        return self.derived_key[16:]
 
-    def make_json(self, out: Path | str):
+    @property
+    def init_vector(self) -> bytes:
+        return self.derived_key[:16]
+
+    def make_json(self, out: Path | str, indent: int = 2):
         if not isinstance(out, Path):
             out = Path(out)
-        out.write_text(json.dumps(self.save_data))
+        out.write_text(json.dumps(self.save_data, indent=indent))
 
     @property
     def save_data(self):
         return json.loads(self._uncompressed_save())
 
     @property
-    def _save_cipher(self):
-        return AES.new(self.derived_key, AES.MODE_CBC, iv=self.derived_key)
+    def cipher(self):
+        if not self._cipher:
+            self._cipher = self._make_cipher()
+        return self._cipher
+
+    def _make_cipher(self):
+        return AES.new(self.key, AES.MODE_CBC, iv=self.init_vector)
 
     def _uncompressed_save(self) -> bytes:
-        return zlib.decompress(self._decrypted_save())
+        return zlib.decompress(self.decrypted_save())
 
-    def _decrypted_save(self) -> bytes:
-        return self._save_cipher.decrypt(self.encrypted_save)
+    def decrypted_save(self) -> bytes:
+        return self.cipher.decrypt(self.encrypted_save)
 
     @property
     def encrypted_save(self) -> bytes:
@@ -95,5 +101,5 @@ class Save:
             # Unpack a char[24]
             salt = struct.unpack("24s", fp.read(self._SALT_LENGTH))[0]
             # The rest is encrypted data, just read the rest
-            payload = fp.read()
-        return header, password_index, salt, payload
+            encrypted_save = fp.read()
+        return header, password_index, salt, encrypted_save
