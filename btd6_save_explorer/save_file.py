@@ -3,7 +3,7 @@ import json
 import struct
 import zlib
 from pathlib import Path
-
+from functools import cached_property
 from Crypto.Cipher import AES
 
 FILE_PIECES = tuple[bytes, int, bytes, bytes]
@@ -25,13 +25,13 @@ class Save:
     def __init__(self, file: Path | str):
         if not isinstance(file, Path):
             file = Path(file)
+        self._file = file
         (
             self._dummy_header,
             self._password_index,
             self._salt,
             self._encrypted_save,
-        ) = self._read_file(file)
-        self._cipher = None
+        ) = self._read_file(self._file)
 
     @property
     def dummy_header(self) -> bytes:
@@ -72,22 +72,19 @@ class Save:
             out = Path(out)
         out.write_text(json.dumps(self.save_data, indent=indent))
 
-    @property
+    @cached_property
     def save_data(self):
-        return json.loads(self._uncompressed_save())
+        return json.loads(self._uncompressed_save)
 
-    @property
+    @cached_property
     def cipher(self):
-        if not self._cipher:
-            self._cipher = self._make_cipher()
-        return self._cipher
-
-    def _make_cipher(self):
         return AES.new(self.key, AES.MODE_CBC, iv=self.init_vector)
 
+    @cached_property
     def _uncompressed_save(self) -> bytes:
-        return zlib.decompress(self.decrypted_save())
+        return zlib.decompress(self.decrypted_save)
 
+    @cached_property
     def decrypted_save(self) -> bytes:
         return self.cipher.decrypt(self.encrypted_save)
 
